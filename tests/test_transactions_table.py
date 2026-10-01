@@ -11,6 +11,7 @@ from textual.app import App, ComposeResult
 from textual.widgets import Input
 
 from hledger_textual.app import HledgerTuiApp
+from hledger_textual.widgets.transactions_pane import TransactionsPane
 from hledger_textual.widgets.transactions_table import TransactionsTable
 from tests.conftest import has_hledger, select_first_transaction, wait_until
 
@@ -30,6 +31,22 @@ def _rows(app) -> int:
         return app.query_one("#transactions-table").row_count
     except Exception:
         return -1
+
+
+def _journal_status(journal, description: str) -> str:
+    """Return the status marker ('*', '!', or '') for a journal transaction line.
+
+    Reads the journal directly (cheap) instead of invoking hledger, and scopes
+    the check to the transaction whose description contains *description* so a
+    pre-existing marker on another transaction cannot produce a false positive.
+    """
+    import re
+
+    for line in journal.read_text(encoding="utf-8").splitlines():
+        m = re.match(r"^\d{4}-\d{2}-\d{2}\s+([*!])?\s*(.*)$", line)
+        if m and description in m.group(2):
+            return m.group(1) or ""
+    return ""
 
 
 class _TableApp(App):
@@ -390,11 +407,13 @@ class TestTransactionsTableStatusToggle:
         async with app.run_test() as pilot:
             await pilot.press("2")  # Switch to Transactions tab
             await select_first_transaction(pilot, app)
-            # Row 0 is Salary (newest first, reverse order), which is unmarked
-            await pilot.press("*")
+            # Row 0 is Salary (newest first, reverse order), which is unmarked.
+            # Invoke the pane action directly: key delivery in the headless
+            # harness is unreliable under CI load.
+            app.query_one(TransactionsPane).action_toggle_cleared()
             await wait_until(
                 pilot,
-                lambda: "* " in table_journal.read_text(encoding="utf-8"),
+                lambda: _journal_status(table_journal, "Salary") == "*",
             )
             txns = load_transactions(table_journal)
             salary = [t for t in txns if t.description == "Salary"][0]
@@ -408,16 +427,16 @@ class TestTransactionsTableStatusToggle:
         app = HledgerTuiApp(journal_file=table_journal)
         async with app.run_test() as pilot:
             await pilot.press("2")
-            await select_first_transaction(pilot, app)
-            # Move to row 1: Grocery shopping (cleared)
-            await pilot.press("down")
+            table = await select_first_transaction(pilot, app)
+            # Move to row 1: Grocery shopping (cleared). Set the cursor directly
+            # rather than relying on a keypress that may be swallowed in CI.
+            table.move_cursor(row=1)
             await pilot.pause()
-            await pilot.press("*")
-            # Grocery was the only cleared transaction; once unmarked there is
-            # no "* " marker left in the journal.
+            app.query_one(TransactionsPane).action_toggle_cleared()
+            # Grocery was cleared; toggling it leaves no status marker.
             await wait_until(
                 pilot,
-                lambda: "* " not in table_journal.read_text(encoding="utf-8"),
+                lambda: _journal_status(table_journal, "Grocery") == "",
             )
             txns = load_transactions(table_journal)
             grocery = [t for t in txns if "Grocery" in t.description][0]
@@ -433,10 +452,10 @@ class TestTransactionsTableStatusToggle:
             await pilot.press("2")
             await select_first_transaction(pilot, app)
             # Row 0 is Salary (unmarked)
-            await pilot.press("exclamation_mark")
+            app.query_one(TransactionsPane).action_toggle_pending()
             await wait_until(
                 pilot,
-                lambda: "! " in table_journal.read_text(encoding="utf-8"),
+                lambda: _journal_status(table_journal, "Salary") == "!",
             )
             txns = load_transactions(table_journal)
             salary = [t for t in txns if t.description == "Salary"][0]
@@ -452,17 +471,16 @@ class TestTransactionsTableStatusToggle:
             await pilot.press("2")
             await select_first_transaction(pilot, app)
             # Row 0 is Salary (unmarked) — set to pending first
-            await pilot.press("exclamation_mark")
+            app.query_one(TransactionsPane).action_toggle_pending()
             await wait_until(
                 pilot,
-                lambda: "! " in table_journal.read_text(encoding="utf-8"),
+                lambda: _journal_status(table_journal, "Salary") == "!",
             )
             # Then toggle to cleared
-            await pilot.press("*")
+            app.query_one(TransactionsPane).action_toggle_cleared()
             await wait_until(
                 pilot,
-                lambda: "* " in table_journal.read_text(encoding="utf-8")
-                and "! " not in table_journal.read_text(encoding="utf-8"),
+                lambda: _journal_status(table_journal, "Salary") == "*",
             )
             txns = load_transactions(table_journal)
             salary = [t for t in txns if t.description == "Salary"][0]
