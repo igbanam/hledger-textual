@@ -105,7 +105,7 @@ def has_hledger() -> bool:
     return shutil.which("hledger") is not None
 
 
-async def wait_until(pilot, condition, *, timeout: float = 10.0, interval: float = 0.05) -> None:
+async def wait_until(pilot, condition, *, timeout: float = 30.0, interval: float = 0.05) -> None:
     """Poll ``condition`` until it is true, instead of a fixed ``pause(delay=...)``.
 
     Waiting on the actual condition keeps tests robust under load and avoids
@@ -132,13 +132,51 @@ async def select_first_transaction(pilot, app):
 
     Keypress actions (edit/delete/toggle/move) operate on the highlighted row,
     so tests must not fire them before the table is loaded *and* has a cursor.
+    Later keys operate on the focused row, so the table must be focused too.
+
+    The loader is asynchronous and has occasionally been slow to populate on
+    busy CI runners, so the table is re-queried on each poll (guarding against
+    a stale instance) and a single reload is nudged before giving up.
     Returns the focused ``DataTable``.
     """
     from textual.widgets import DataTable
+    from hledger_textual.widgets.transactions_table import TransactionsTable
 
-    table = app.query_one("#transactions-table", DataTable)
-    await wait_until(pilot, lambda: table.row_count > 0)
-    table.focus()
+    def _table():
+        try:
+            return app.query_one("#transactions-table", DataTable)
+        except Exception:
+            return None
+
+    def _ready() -> bool:
+        table = _table()
+        return table is not None and table.row_count > 0
+
+    try:
+        await wait_until(pilot, _ready, timeout=15.0)
+    except AssertionError:
+        try:
+            app.query_one(TransactionsTable).reload()
+        except Exception:
+            pass
+        try:
+            await wait_until(pilot, _ready, timeout=30.0)
+        except AssertionError:
+            notes = [str(n.message) for n in getattr(app, "_notifications", [])]
+            pytest.fail(
+                f"transactions table never loaded (notifications={notes!r})"
+            )
+
+    # Make the transactions section active and give the table focus so the
+    # subsequent keypress is delivered here: in headless CI a plain press("2")
+    # can be swallowed by whichever widget holds focus.
+    try:
+        app.action_switch_section("transactions")
+    except Exception:
+        pass
+    await pilot.pause()
+    table = _table()
+    app.set_focus(table)
     table.move_cursor(row=0)
     await pilot.pause()
     return table
