@@ -12,16 +12,16 @@ from textual.widgets import Input
 
 from hledger_textual.app import HledgerTuiApp
 from hledger_textual.widgets.transactions_table import TransactionsTable
-from tests.conftest import has_hledger, wait_until
+from tests.conftest import has_hledger, select_first_transaction, wait_until
 
 
 def _transactions_ready(app) -> bool:
-    """True once the transactions table has rows and holds focus."""
+    """True once the transactions table has loaded at least one row."""
     try:
         table = app.query_one("#transactions-table")
     except Exception:
         return False
-    return table.row_count > 0 and table.has_focus
+    return table.row_count > 0
 
 
 def _rows(app) -> int:
@@ -304,7 +304,7 @@ class TestTransactionsTableEditFlow:
         app = HledgerTuiApp(journal_file=table_journal)
         async with app.run_test() as pilot:
             await pilot.press("2")
-            await wait_until(pilot, lambda: _transactions_ready(app))
+            await select_first_transaction(pilot, app)
             await pilot.press("e")
             from hledger_textual.screens.transaction_form import TransactionFormScreen
             from hledger_textual.widgets.autocomplete_input import AutocompleteInput
@@ -339,7 +339,7 @@ class TestTransactionsTableEditFlow:
         app = HledgerTuiApp(journal_file=table_journal)
         async with app.run_test(notifications=True) as pilot:
             await pilot.press("2")
-            await wait_until(pilot, lambda: _transactions_ready(app))
+            await select_first_transaction(pilot, app)
             await pilot.press("e")
             from hledger_textual.screens.transaction_form import TransactionFormScreen
             from hledger_textual.widgets.autocomplete_input import AutocompleteInput
@@ -373,7 +373,7 @@ class TestTransactionsTableEditFlow:
         app = HledgerTuiApp(journal_file=table_journal)
         async with app.run_test(notifications=True) as pilot:
             await pilot.press("2")
-            await wait_until(pilot, lambda: _transactions_ready(app))
+            await select_first_transaction(pilot, app)
             await pilot.press("d")
             from hledger_textual.screens.delete_confirm import DeleteConfirmModal
             await wait_until(pilot, lambda: isinstance(app.screen, DeleteConfirmModal))
@@ -401,7 +401,7 @@ class TestTransactionsTableStatusToggle:
         app = HledgerTuiApp(journal_file=table_journal)
         async with app.run_test() as pilot:
             await pilot.press("2")  # Switch to Transactions tab
-            await wait_until(pilot, lambda: _transactions_ready(app))
+            await select_first_transaction(pilot, app)
             # Row 0 is Salary (newest first, reverse order), which is unmarked
             await pilot.press("*")
             await wait_until(
@@ -421,7 +421,7 @@ class TestTransactionsTableStatusToggle:
         app = HledgerTuiApp(journal_file=table_journal)
         async with app.run_test() as pilot:
             await pilot.press("2")
-            await wait_until(pilot, lambda: _transactions_ready(app))
+            await select_first_transaction(pilot, app)
             # Move to row 1: Grocery shopping (cleared)
             await pilot.press("down")
             await pilot.pause()
@@ -443,7 +443,7 @@ class TestTransactionsTableStatusToggle:
         app = HledgerTuiApp(journal_file=table_journal)
         async with app.run_test() as pilot:
             await pilot.press("2")
-            await wait_until(pilot, lambda: _transactions_ready(app))
+            await select_first_transaction(pilot, app)
             # Row 0 is Salary (unmarked)
             await pilot.press("exclamation_mark")
             await wait_until(
@@ -463,7 +463,7 @@ class TestTransactionsTableStatusToggle:
         app = HledgerTuiApp(journal_file=table_journal)
         async with app.run_test() as pilot:
             await pilot.press("2")
-            await wait_until(pilot, lambda: _transactions_ready(app))
+            await select_first_transaction(pilot, app)
             # Row 0 is Salary (unmarked) — set to pending first
             await pilot.press("exclamation_mark")
             await wait_until(
